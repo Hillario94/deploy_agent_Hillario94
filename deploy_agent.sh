@@ -1,8 +1,131 @@
 #!/bin/bash
-PN=""
-cleanup(){ echo "[!] Interrupted"; if [ -n "$PN" ] && [ -d "attendance_tracker_$PN" ]; then zip -r attendance_tracker_${PN}_archive.zip attendance_tracker_$PN >/dev/null; echo "zip created"; rm -rf attendance_tracker_$PN; echo "deleted"; fi; exit 1; }
-deploy(){
-echo "=== Pre-flight ==="; command -v python3 >/dev/null || { echo "no python3"; return 1; }; echo $(python3 --version); command -v zip >/dev/null || { echo "no zip"; return 1; }; read -p "project name: " n; [ -z "$n" ] && { echo "empty"; return 1; }; PN=$n; D=attendance_tracker_$n; trap cleanup SIGINT SIGTSTP; if [ -d $D ]; then read -p "overwrite/abort: " c; [[ $c == o* ]] && rm -rf $D || { echo abort; trap - SIGINT SIGTSTP; PN=""; return 1; }; fi; mkdir -p $D/Helpers $D/reports || return 1; cp templates/attendance_checker.py $D/; cp templates/config.json $D/; cp templates/config.json $D/Helpers/; read -p "Roster A/B: " r; while true; do read -p "students 1-10: " N; [[ $N =~ ^[0-9]+$ ]] && [ $N -ge 1 ] && [ $N -le 10 ] && break; echo invalid; done; if [[ $r == A* ]]; then head -n $((N+1)) templates/assets.csv > $D/Helpers/assets.csv; cp $D/Helpers/assets.csv $D/; else head -n1 templates/assets.csv > $D/Helpers/assets.csv; for ((i=1;i<=N;i++)); do echo "s${i}@e.com,Stu${i},0,0" >> $D/Helpers/assets.csv; done; cp $D/Helpers/assets.csv $D/; sed -i 's/"total_sessions":.*/"total_sessions": 1/' $D/config.json; sed -i 's/"total_sessions":.*/"total_sessions": 1/' $D/Helpers/config.json; fi; chmod +x $D/attendance_checker.py; chmod 600 $D/config.json $D/Helpers/config.json; ls -l $D/config.json $D/attendance_checker.py; read -p "update threshold yes/no: " u; if [[ $u == y* ]]; then while true; do read -p "warning [75]: " w; w=${w:-75}; read -p "failure [50]: " f; f=${f:-50}; [[ $w =~ ^[0-9]+$ ]] && [[ $f =~ ^[0-9]+$ ]] && [ $w -le 100 ] && [ $f -le 100 ] && [ $f -lt $w ] && break; echo "invalid"; done; sed -i "s/\"warning\":.*/\"warning\": $w,/" $D/config.json; sed -i "s/\"warning\":.*/\"warning\": $w,/" $D/Helpers/config.json; sed -i "s/\"failure\":.*/\"failure\": $f/" $D/config.json; sed -i "s/\"failure\":.*/\"failure\": $f/" $D/Helpers/config.json; cat $D/config.json; fi; trap - SIGINT SIGTSTP; echo deployed; PN=$n; run_app $n; PN=""; }
-run_app(){ p=${1:-""}; [ -z "$p" ] && read -p "project: " p; [ -d attendance_tracker_$p ] || { echo not found; return 1; }; (cd attendance_tracker_$p && python3 attendance_checker.py); }
-archive_logs(){ read -p "project: " p; D=attendance_tracker_$p; [ -d $D ] || { echo not found; return 1; }; mkdir -p archives/attendance archives/absent; ts=$(date +%Y%m%d_%H%M%S); [ -f $D/reports/attendance.log ] && cp $D/reports/attendance.log archives/attendance/attendance_${ts}.log && echo archived attendance || echo "attendance.log not found"; [ -f $D/reports/absent.log ] && cp $D/reports/absent.log archives/absent/absent_${ts}.log && echo archived absent || echo "absent.log not found"; }
-while true; do echo ""; echo "1)Deploy 2)Run 3)Archive 4)Exit"; read -p "> " o; case $o in 1) deploy;; 2) run_app;; 3) archive_logs;; 4) exit 0;; *) echo invalid;; esac; done
+
+PROJECT_DIR=""
+PROJECT_NAME=""
+
+cleanup() {
+    echo ""
+    echo "[!] Deployment interrupted by user!"
+    if [ -n "$PROJECT_DIR" ] && [ -d "$PROJECT_DIR" ]; then
+        echo "[*] Archiving incomplete project..."
+        zip -r "${PROJECT_NAME}_archive.zip" "$PROJECT_DIR" > /dev/null 2>&1
+        echo "[*] Archived to ${PROJECT_NAME}_archive.zip"
+        rm -rf "$PROJECT_DIR"
+        echo "[*] Incomplete directory deleted."
+    fi
+    echo "[*] Exiting cleanly."
+    exit 1
+}
+
+deploy() {
+    trap cleanup SIGINT SIGTSTP
+    
+    echo "=== Pre-flight Checks ==="
+    command -v python3 >/dev/null || { echo "python3 not found!"; return; }
+    command -v zip >/dev/null || { echo "zip not found!"; return; }
+    echo "python3 and zip OK"
+
+    read -p "Enter project name: " pname
+    PROJECT_NAME="attendance_tracker_${pname}"
+    PROJECT_DIR="$PROJECT_NAME"
+    
+    if [ -d "$PROJECT_DIR" ]; then
+        read -p "Directory exists. Overwrite? (y/n): " ans
+        if [[ "$ans" != "y" ]]; then
+            echo "Aborted."
+            return
+        fi
+        rm -rf "$PROJECT_DIR"
+    fi
+
+    mkdir -p "$PROJECT_DIR/Helpers" "$PROJECT_DIR/reports" "$PROJECT_DIR/archives/attendance" "$PROJECT_DIR/archives/absent"
+
+    cp templates/attendance_checker.py "$PROJECT_DIR/"
+    cp templates/config.json "$PROJECT_DIR/Helpers/"
+    
+    read -p "Choose roster: A=copy from template, B=generate fresh (A/B): " choice
+    read -p "How many students? " count
+
+    if ! [[ "$count" =~ ^[0-9]+$ ]]; then
+        echo "Count must be numeric!"
+        return
+    fi
+
+    if [[ "$choice" == "A" || "$choice" == "a" ]]; then
+        head -n 1 templates/assets.csv > "$PROJECT_DIR/Helpers/assets.csv"
+        head -n $((count+1)) templates/assets.csv | tail -n $count >> "$PROJECT_DIR/Helpers/assets.csv"
+        cp "$PROJECT_DIR/Helpers/assets.csv" "$PROJECT_DIR/assets.csv"
+    else
+        echo "Email,Names,Attendance Count,Absence Count" > "$PROJECT_DIR/Helpers/assets.csv"
+        names=("Alice Johnson" "Bob Smith" "Charlie Brown" "David Lee" "Emma Wilson")
+        emails=("alice@example.com" "bob@example.com" "charlie@example.com" "david@example.com" "emma@example.com")
+        for ((i=0;i<count;i++)); do
+            idx=$((i % 5))
+            echo "${emails[$idx]},${names[$idx]},0,0" >> "$PROJECT_DIR/Helpers/assets.csv"
+        done
+        cp "$PROJECT_DIR/Helpers/assets.csv" "$PROJECT_DIR/assets.csv"
+        sed -i 's/"total_sessions": 5/"total_sessions": 1/' "$PROJECT_DIR/Helpers/config.json"
+    fi
+
+    chmod +x "$PROJECT_DIR/attendance_checker.py"
+    chmod 600 "$PROJECT_DIR/Helpers/config.json"
+    echo "Permissions set: +x for .py, 600 for config.json"
+
+    read -p "Update thresholds? (y/n): " up
+    if [[ "$up" == "y" ]]; then
+        read -p "Enter new warning threshold (default 75): " warn
+        read -p "Enter new failure threshold (default 50): " fail
+        if ! [[ "$warn" =~ ^[0-9]+$ ]] || ! [[ "$fail" =~ ^[0-9]+$ ]]; then
+            echo "Error: thresholds must be numeric!"
+            return
+        fi
+        sed -i "s/\"warning\": [0-9]*/\"warning\": $warn/" "$PROJECT_DIR/Helpers/config.json"
+        sed -i "s/\"failure\": [0-9]*/\"failure\": $fail/" "$PROJECT_DIR/Helpers/config.json"
+        echo "Thresholds updated."
+    fi
+
+    trap - SIGINT SIGTSTP
+    echo "Deploy done. Verifying..."
+    cd "$PROJECT_DIR" && python3 attendance_checker.py
+    cd ..
+}
+
+run_app() {
+    read -p "Enter project name: " pname
+    PROJECT_DIR="attendance_tracker_${pname}"
+    if [ ! -d "$PROJECT_DIR" ]; then echo "Not found!"; return; fi
+    cd "$PROJECT_DIR" && python3 attendance_checker.py
+    cd ..
+}
+
+archive_logs() {
+    read -p "Enter project name: " pname
+    PROJECT_DIR="attendance_tracker_${pname}"
+    if [ ! -d "$PROJECT_DIR" ]; then echo "Not found!"; return; fi
+    TS=$(date +%Y%m%d_%H%M%S)
+    if [ -f "$PROJECT_DIR/reports/attendance.log" ]; then
+        cp "$PROJECT_DIR/reports/attendance.log" "$PROJECT_DIR/archives/attendance/attendance_${TS}.log"
+        echo "Archived: archives/attendance/attendance_${TS}.log"
+    else
+        echo "attendance.log not found"
+    fi
+    if [ -f "$PROJECT_DIR/reports/absent.log" ]; then
+        cp "$PROJECT_DIR/reports/absent.log" "$PROJECT_DIR/archives/absent/absent_${TS}.log"
+        echo "Archived: archives/absent/absent_${TS}.log"
+    else
+        echo "absent.log not found"
+    fi
+}
+
+while true; do
+    echo ""
+    echo "1) Deploy 2) Run 3) Archive 4) Exit"
+    read -p "Choose: " opt
+    case $opt in
+        1) deploy ;;
+        2) run_app ;;
+        3) archive_logs ;;
+        4) exit 0 ;;
+        *) echo "Invalid" ;;
+    esac
+done
