@@ -21,8 +21,10 @@ Checks reports/attendance.log and reports/absent.log exist. Copies to archives/a
 Trap active during deploy only. On Ctrl+C or Ctrl+Z: prints interrupted message, zip -r project_archive.zip project/, rm -rf incomplete dir, exit clean. Test: run deploy and press Ctrl+C fast, then ls *.zip.
 
 ## 5. Tested Structure
-ls -R shows attendance_checker.py (+x), assets.csv, Helpers/config.json (600) and Helpers/assets.csv, reports/ with logs, archives/ after archive. Pre-flight checks python3 and zip.
+ls -R shows attendance_checker.py (+x), Helpers/assets.csv, Helpers/config.json, reports/
 
 ## 6. Video
 Video Link: PASTE_YOUR_LINK_HERE
-GitHub: https://github.com/Hillario94/deploy_agent_Hillario94/tree/dev
+
+## 7. Repository
+GitHub: https://github.com/Hillario94/deploy_agent_Hillario94
