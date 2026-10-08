@@ -25,4 +25,4 @@ ls -R shows attendance_checker.py (+x), assets.csv, Helpers/config.json (600) an
 
 ## 6. Video
 Video Link: PASTE_YOUR_LINK_HERE
-GitHub: https://github.com/Hillario94/deploy_agent_hillario94/tree/dev
+GitHub: https://github.com/Hillario94/deploy_agent_Hillario94/tree/dev
