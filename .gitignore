@@ -1,2 +1,5 @@
 archives/
 *.zip
+attendance_tracker_*/
+reports/
+*.zip
