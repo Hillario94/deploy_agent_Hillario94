@@ -3,3 +3,4 @@ archives/
 attendance_tracker_*/
 reports/
 *.zip
+__pycache__/
