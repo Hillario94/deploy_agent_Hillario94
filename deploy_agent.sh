@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 PROJECT_DIR=""
 PROJECT_NAME=""
@@ -19,114 +19,153 @@ cleanup() {
 
 deploy() {
     trap cleanup SIGINT SIGTSTP
-    
-    echo "=== Pre-flight Checks ==="
-    command -v python3 >/dev/null || { echo "python3 not found!"; return; }
-    command -v zip >/dev/null || { echo "zip not found!"; return; }
-    echo "python3 and zip OK"
 
-    read -p "Enter project name: " pname
+    echo "=== Pre-flight Checks ==="
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "Error: python3 is not installed!"
+        return 1
+    fi
+    if ! command -v zip >/dev/null 2>&1; then
+        echo "Error: zip is not installed!"
+        return 1
+    fi
+    echo "Pre-flight checks passed: python3 and zip are available."
+
+    read -r -p "Enter project directory suffix: " pname
+    if [ -z "$pname" ]; then
+        echo "Error: Project name cannot be empty!"
+        return 1
+    fi
+
     PROJECT_NAME="attendance_tracker_${pname}"
     PROJECT_DIR="$PROJECT_NAME"
-    
+
     if [ -d "$PROJECT_DIR" ]; then
-        read -p "Directory exists. Overwrite? (y/n): " ans
-        if [[ "$ans" != "y" ]]; then
-            echo "Aborted."
-            return
+        read -r -p "Directory '${PROJECT_DIR}' already exists. Overwrite? (y/n): " ans
+        if [[ "$ans" != "y" && "$ans" != "Y" ]]; then
+            echo "Deployment aborted."
+            return 1
         fi
         rm -rf "$PROJECT_DIR"
     fi
 
-    mkdir -p "$PROJECT_DIR/Helpers" "$PROJECT_DIR/reports" "$PROJECT_DIR/archives/attendance" "$PROJECT_DIR/archives/absent"
+    mkdir -p "$PROJECT_DIR/Helpers" \
+             "$PROJECT_DIR/reports" \
+             "$PROJECT_DIR/archives/attendance" \
+             "$PROJECT_DIR/archives/absent"
 
     cp templates/attendance_checker.py "$PROJECT_DIR/"
     cp templates/config.json "$PROJECT_DIR/Helpers/"
-    
-    read -p "Choose roster: A=copy from template, B=generate fresh (A/B): " choice
-    read -p "How many students? " count
 
-    if ! [[ "$count" =~ ^[0-9]+$ ]]; then
-        echo "Count must be numeric!"
-        return
+    read -r -p "Choose roster option (A: copy from template, B: generate fresh): " choice
+    read -r -p "How many students? " count
+
+    if ! [[ "$count" =~ ^[1-9][0-9]*$ ]]; then
+        echo "Error: Student count must be a positive integer!"
+        return 1
     fi
 
     if [[ "$choice" == "A" || "$choice" == "a" ]]; then
-        head -n 1 templates/assets.csv > "$PROJECT_DIR/Helpers/assets.csv"
-        head -n $((count+1)) templates/assets.csv | tail -n $count >> "$PROJECT_DIR/Helpers/assets.csv"
-        cp "$PROJECT_DIR/Helpers/assets.csv" "$PROJECT_DIR/assets.csv"
-    else
+        head -n "$((count + 1))" templates/assets.csv > "$PROJECT_DIR/Helpers/assets.csv"
+    elif [[ "$choice" == "B" || "$choice" == "b" ]]; then
         echo "Email,Names,Attendance Count,Absence Count" > "$PROJECT_DIR/Helpers/assets.csv"
         names=("Alice Johnson" "Bob Smith" "Charlie Brown" "David Lee" "Emma Wilson")
         emails=("alice@example.com" "bob@example.com" "charlie@example.com" "david@example.com" "emma@example.com")
-        for ((i=0;i<count;i++)); do
+        
+        for ((i=0; i<count; i++)); do
             idx=$((i % 5))
             echo "${emails[$idx]},${names[$idx]},0,0" >> "$PROJECT_DIR/Helpers/assets.csv"
         done
-        cp "$PROJECT_DIR/Helpers/assets.csv" "$PROJECT_DIR/assets.csv"
-        sed -i 's/"total_sessions": 5/"total_sessions": 1/' "$PROJECT_DIR/Helpers/config.json"
+
+        sed -i 's/"total_sessions": *[0-9]*/"total_sessions": 1/' "$PROJECT_DIR/Helpers/config.json"
+    else
+        echo "Error: Invalid roster option selected!"
+        return 1
     fi
 
     chmod +x "$PROJECT_DIR/attendance_checker.py"
     chmod 600 "$PROJECT_DIR/Helpers/config.json"
-    echo "Permissions set: +x for .py, 600 for config.json"
+    echo "Permissions set: executable (+x) on attendance_checker.py, read/write (600) on config.json."
 
-    read -p "Update thresholds? (y/n): " up
-    if [[ "$up" == "y" ]]; then
-        read -p "Enter new warning threshold (default 75): " warn
-        read -p "Enter new failure threshold (default 50): " fail
+    read -r -p "Update attendance alert thresholds? (y/n): " up
+    if [[ "$up" == "y" || "$up" == "Y" ]]; then
+        read -r -p "Enter new warning threshold (default 75): " warn
+        read -r -p "Enter new failure threshold (default 50): " fail
+
         if ! [[ "$warn" =~ ^[0-9]+$ ]] || ! [[ "$fail" =~ ^[0-9]+$ ]]; then
-            echo "Error: thresholds must be numeric!"
-            return
+            echo "Error: Threshold values must be numeric!"
+            return 1
         fi
-        sed -i "s/\"warning\": [0-9]*/\"warning\": $warn/" "$PROJECT_DIR/Helpers/config.json"
-        sed -i "s/\"failure\": [0-9]*/\"failure\": $fail/" "$PROJECT_DIR/Helpers/config.json"
-        echo "Thresholds updated."
+
+        sed -i "s/\"warning\": *[0-9]*/\"warning\": $warn/" "$PROJECT_DIR/Helpers/config.json"
+        sed -i "s/\"failure\": *[0-9]*/\"failure\": $fail/" "$PROJECT_DIR/Helpers/config.json"
+        echo "Thresholds updated successfully."
     fi
 
     trap - SIGINT SIGTSTP
-    echo "Deploy done. Verifying..."
-    cd "$PROJECT_DIR" && python3 attendance_checker.py
-    cd ..
+    echo "Deployment complete. Running verification test..."
+
+    (cd "$PROJECT_DIR" && python3 attendance_checker.py)
 }
 
 run_app() {
-    read -p "Enter project name: " pname
-    PROJECT_DIR="attendance_tracker_${pname}"
-    if [ ! -d "$PROJECT_DIR" ]; then echo "Not found!"; return; fi
-    cd "$PROJECT_DIR" && python3 attendance_checker.py
-    cd ..
+    read -r -p "Enter project directory suffix: " pname
+    local target="attendance_tracker_${pname}"
+
+    if [ ! -d "$target" ]; then
+        echo "Error: Directory '$target' not found!"
+        return 1
+    fi
+
+    (cd "$target" && python3 attendance_checker.py)
 }
 
 archive_logs() {
-    read -p "Enter project name: " pname
-    PROJECT_DIR="attendance_tracker_${pname}"
-    if [ ! -d "$PROJECT_DIR" ]; then echo "Not found!"; return; fi
-    TS=$(date +%Y%m%d_%H%M%S)
-    if [ -f "$PROJECT_DIR/reports/attendance.log" ]; then
-        cp "$PROJECT_DIR/reports/attendance.log" "$PROJECT_DIR/archives/attendance/attendance_${TS}.log"
-        echo "Archived: archives/attendance/attendance_${TS}.log"
-    else
-        echo "attendance.log not found"
+    read -r -p "Enter project directory suffix: " pname
+    local target="attendance_tracker_${pname}"
+
+    if [ ! -d "$target" ]; then
+        echo "Error: Directory '$target' not found!"
+        return 1
     fi
-    if [ -f "$PROJECT_DIR/reports/absent.log" ]; then
-        cp "$PROJECT_DIR/reports/absent.log" "$PROJECT_DIR/archives/absent/absent_${TS}.log"
-        echo "Archived: archives/absent/absent_${TS}.log"
+
+    local ts
+    ts=$(date +"%Y%m%d_%H%M%S")
+
+    mkdir -p "$target/archives/attendance" "$target/archives/absent"
+
+    if [ -f "$target/reports/attendance.log" ]; then
+        cp "$target/reports/attendance.log" "$target/archives/attendance/attendance_${ts}.log"
+        echo "Archived: $target/archives/attendance/attendance_${ts}.log"
     else
-        echo "absent.log not found"
+        echo "Notice: reports/attendance.log not found, skipping."
+    fi
+
+    if [ -f "$target/reports/absent.log" ]; then
+        cp "$target/reports/absent.log" "$target/archives/absent/absent_${ts}.log"
+        echo "Archived: $target/archives/absent/absent_${ts}.log"
+    else
+        echo "Notice: reports/absent.log not found, skipping."
     fi
 }
 
 while true; do
     echo ""
-    echo "1) Deploy 2) Run 3) Archive 4) Exit"
-    read -p "Choose: " opt
-    case $opt in
+    echo "======================================"
+    echo " Attendance Tracker Deployment Agent  "
+    echo "======================================"
+    echo "1) Deploy Application"
+    echo "2) Run Application"
+    echo "3) Archive Logs"
+    echo "4) Exit"
+    read -r -p "Select an option [1-4]: " opt
+
+    case "$opt" in
         1) deploy ;;
         2) run_app ;;
         3) archive_logs ;;
-        4) exit 0 ;;
-        *) echo "Invalid" ;;
+        4) echo "Exiting."; exit 0 ;;
+        *) echo "Invalid option. Please enter 1, 2, 3, or 4." ;;
     esac
 done
 
