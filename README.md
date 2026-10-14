@@ -24,7 +24,7 @@ Trap active during deploy only. On Ctrl+C or Ctrl+Z: prints interrupted message,
 ls -R shows attendance_checker.py (+x), Helpers/assets.csv, Helpers/config.json, reports/
 
 ## 6. Video
-Video Link: PASTE_YOUR_LINK_HERE
+Video Link: https://drive.google.com/file/d/1dxjq4KSjYg15xzITzg7qLy7t8P0iUo1p/view?usp=sharing
 
 ## 7. Repository
 GitHub: https://github.com/Hillario94/deploy_agent_Hillario94
